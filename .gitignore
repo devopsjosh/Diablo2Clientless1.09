@@ -348,3 +348,6 @@ src/ConsoleBot/Properties/launchSettings.json
 ./config.json
 ./muleconfig.json
 ./meph1log.txt
+config.json
+muleconfig.json
+meph1log.txt
