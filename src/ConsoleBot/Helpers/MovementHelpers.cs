@@ -207,12 +207,25 @@ public static class MovementHelpers
             {
                 break;
             }
+
+            if (IsLowManaForTeleport(game) && game.UseManaPotion())
+            {
+                // Give the game a short moment to apply mana potion updates before next cast.
+                await Task.Delay(120);
+            }
+
             var retryTeleportTask = GeneralHelpers.TryWithTimeout(async (retryCount) =>
             {
                 if (token.HasValue && token.Value.IsCancellationRequested)
                 {
                     return true;
                 }
+
+                if (IsLowManaForTeleport(game) && game.UseManaPotion())
+                {
+                    await Task.Delay(120);
+                }
+
                 if (!await game.TeleportToLocationAsync(point))
                 {
                     Log.Debug($"Teleport to {point} failing retrying at location: {game.Me.Location}");
@@ -240,5 +253,15 @@ public static class MovementHelpers
         }
 
         return true;
+    }
+
+    private static bool IsLowManaForTeleport(Game game)
+    {
+        if (game.Me.MaxMana <= 0)
+        {
+            return false;
+        }
+
+        return game.Me.Mana < 25 || game.Me.Mana < game.Me.MaxMana * 0.12;
     }
 }

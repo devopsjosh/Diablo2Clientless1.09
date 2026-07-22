@@ -18,7 +18,6 @@
     <PackageReference Include="Serilog.Extensions.Logging" />
     <PackageReference Include="Serilog.Extensions.Logging.File" />
     <PackageReference Include="Telegram.Bot" />
-    <PackageReference Include="Telegram.Bot.Extensions.Polling" />
   </ItemGroup>
 
   <ItemGroup>

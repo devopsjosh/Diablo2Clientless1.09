@@ -2,6 +2,7 @@
 using D2NG.Core.BNCS.Packet;
 using D2NG.Core.D2GS.Packet;
 using D2NG.Core.D2GS.Packet.Incoming;
+using ConsoleBot.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System;
@@ -9,7 +10,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Telegram.Bot;
-using Telegram.Bot.Extensions.Polling;
+using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 
@@ -20,6 +21,7 @@ public class ExternalMessagingClient : IExternalMessagingClient
     private readonly ExternalMessagingConfiguration _externalConfiguration;
     private readonly ITelegramBotClient _telegramBotClient;
     private readonly List<Client> _clients = [];
+    private readonly object _clientsLock = new();
     private readonly ILogger<ExternalMessagingClient> _logger;
 
     public ExternalMessagingClient(IOptions<ExternalMessagingConfiguration> externalConfiguration, ILogger<ExternalMessagingClient> logger)
@@ -29,6 +31,7 @@ public class ExternalMessagingClient : IExternalMessagingClient
         _logger = logger;
         if(_externalConfiguration.ReceiveMessages)
         {
+            _logger.LogInformation("Telegram inbound message polling enabled. Command admin id: {AdminId}, outbound chat id: {ChatId}", _externalConfiguration.TelegramAdminUserId, _externalConfiguration.TelegramChatId);
             var receiverOptions = new ReceiverOptions
             {
             };
@@ -38,23 +41,47 @@ public class ExternalMessagingClient : IExternalMessagingClient
                 receiverOptions
             );
         }
+        else
+        {
+            _logger.LogWarning("Telegram inbound message polling is disabled because externalMessaging.receiveMessages is false");
+        }
     }
 
     public void RegisterClient(Client client)
     {
-        _clients.Add(client);
+        lock (_clientsLock)
+        {
+            _clients.Add(client);
+        }
+
         client.OnReceivedPacketEvent(Sid.CHATEVENT, (packet) => HandleChatEvent(client, packet));
         client.OnReceivedPacketEvent(InComingPacket.ReceiveChat, (packet) => HandleChatMessageEvent(client, packet));
     }
 
-    private Task HandleUpdateAsync(Update update)
+    private async Task HandleUpdateAsync(Update update)
     {
         if (update.Message is Message message)
         {
-            if (message == null || message.Type != MessageType.Text) return Task.CompletedTask;
+            if (message == null || message.Type != MessageType.Text)
+            {
+                return;
+            }
 
             _logger.LogInformation("Text received: {Text}", message.Text);
-            var client = _clients.FirstOrDefault(c => message.Text.StartsWith(c.LoggedInUserName() + " ", StringComparison.InvariantCultureIgnoreCase));
+
+            if (message.Text.StartsWith("/bot", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandleBotCommandAsync(message);
+                return;
+            }
+
+            Client[] clients;
+            lock (_clientsLock)
+            {
+                clients = _clients.ToArray();
+            }
+
+            var client = clients.FirstOrDefault(c => message.Text.StartsWith(c.LoggedInUserName() + " ", StringComparison.InvariantCultureIgnoreCase));
             if (client != null)
             {
                 var modifiedText = message.Text[(client.LoggedInUserName().Length + 1)..];
@@ -72,7 +99,78 @@ public class ExternalMessagingClient : IExternalMessagingClient
                 }
             }
         }
-        return Task.CompletedTask;
+
+        return;
+    }
+
+    private async Task HandleBotCommandAsync(Message message)
+    {
+        var senderUserId = message.From?.Id;
+        var senderChatId = message.Chat.Id;
+
+        if (senderUserId != _externalConfiguration.TelegramAdminUserId && senderChatId != _externalConfiguration.TelegramAdminUserId)
+        {
+            _logger.LogWarning("Unauthorized bot command sender. FromId={FromId}, ChatId={ChatId}", senderUserId, senderChatId);
+            await SendMessage("Unauthorized bot command sender");
+            return;
+        }
+
+        if (!TryParseBotCommand(message.Text, out var command))
+        {
+            await SendMessage("Unsupported bot command. Use /bot stop or /bot start");
+            return;
+        }
+
+        switch (command)
+        {
+            case "stop":
+                if (BotRunControl.Stop())
+                {
+                    await SendMessage("Bot stopped (paused at safe checkpoints)");
+                }
+                else
+                {
+                    await SendMessage("Bot is already stopped");
+                }
+                break;
+            case "start":
+                if (BotRunControl.Start())
+                {
+                    await SendMessage("Bot started (resumed)");
+                }
+                else
+                {
+                    await SendMessage("Bot is already running");
+                }
+                break;
+            default:
+                await SendMessage("Unsupported bot command. Use /bot stop or /bot start");
+                break;
+        }
+    }
+
+    private static bool TryParseBotCommand(string text, out string command)
+    {
+        command = string.Empty;
+        var parts = text.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 2 || !parts[0].Equals("/bot", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (parts[1].Equals("stop", StringComparison.OrdinalIgnoreCase))
+        {
+            command = "stop";
+            return true;
+        }
+
+        if (parts[1].Equals("start", StringComparison.OrdinalIgnoreCase))
+        {
+            command = "start";
+            return true;
+        }
+
+        return false;
     }
 
     private static Task HandleExceptionAsync(Exception exception, ILogger logger)
