@@ -16,6 +16,9 @@ Initially based on https://github.com/dkuwahara/D2NG, but now with a lot more fe
 
 ## Configuring
 Commandline parameters: config="D:\projects\diablo2bot\config.json" muleconfig="D:\projects\diablo2bot\muleconfig.json" 
+
+For a complete reference of all configuration options, see [docs/config.md](docs/config.md).
+
 The above `config.json` should look as follows:
 ```
 {

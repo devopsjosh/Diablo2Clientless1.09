@@ -1,4 +1,5 @@
 ﻿using ConsoleBot.Bots.Types.Assist;
+using ConsoleBot.Bots.Types.Andariel;
 using ConsoleBot.Bots.Types.Baal;
 using ConsoleBot.Bots.Types.Cows;
 using ConsoleBot.Bots.Types.CS;
@@ -24,6 +25,7 @@ public static class BotTypeExtensions
         services.AddSingleton<IBotInstance, PindleBot>();
         services.AddSingleton<IBotInstance, BaalBot>();
         services.AddSingleton<IBotInstance, CubeBot>();
+        services.AddSingleton<IBotInstance, AndarielBot>();
         services.AddSingleton<IBotFactory, BotFactory>();
         services.AddOptions<CowConfiguration>()
             .Bind(config.GetSection("bot").GetSection("cows"));
@@ -41,5 +43,7 @@ public static class BotTypeExtensions
             .Bind(config.GetSection("bot").GetSection("cube"));
         services.AddOptions<AssistConfiguration>()
             .Bind(config.GetSection("bot").GetSection("assist"));
+        services.AddOptions<AndarielConfiguration>()
+            .Bind(config.GetSection("bot").GetSection("andariel"));
     }
 }
