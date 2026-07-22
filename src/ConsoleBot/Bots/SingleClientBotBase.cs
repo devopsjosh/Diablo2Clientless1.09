@@ -47,8 +47,11 @@ public abstract class SingleClientBotBase
             int gameCount = 0;
             int successiveFailures = 0;
             int gameDescriptionIndex = 0;
+            var breakScheduler = new GameBreakScheduler(_config.Humanization);
             while (true)
             {
+                await BotRunControl.WaitIfStoppedAsync();
+
                 if (successiveFailures > 0 && successiveFailures % 10 == 0)
                 {
                     gameDescriptionIndex++;
@@ -81,7 +84,7 @@ public abstract class SingleClientBotBase
                     }
                     else
                     {
-                        await Task.Delay(Math.Pow(successiveFailures, 1.3) * TimeSpan.FromSeconds(5));
+                        await BotRunControl.DelayAsync(Math.Pow(successiveFailures, 1.3) * TimeSpan.FromSeconds(5));
                         await _externalMessagingClient.SendMessage($"{client.LoggedInUserName()}: failed to mule all items, trying again");
                         if (!await RealmConnectHelpers.ConnectToRealmWithRetry(client, _config, _accountConfig, 10))
                         {
@@ -96,6 +99,9 @@ public abstract class SingleClientBotBase
                 {
                     gameCount++;
                     totalCount++;
+                    await BotRunControl.WaitIfStoppedAsync();
+                    await breakScheduler.MaybeApplyBreakAsync();
+                    await BotRunControl.DelayAsync(breakScheduler.GetPreGameCreateDelay());
                     if (await client.CreateGame(_config.Difficulty, $"{_config.GameNamePrefix}{gameCount}", _config.GamePassword, _config.GameDescriptions?.ElementAtOrDefault(gameDescriptionIndex)))
                     {
                         Log.Information("In game");
@@ -113,11 +119,12 @@ public abstract class SingleClientBotBase
                         {
                             successiveFailures = 0;
                         }
+                        breakScheduler.RecordGameCompleted();
                     }
                     else
                     {
                         successiveFailures += 1;
-                        await Task.Delay(Math.Pow(successiveFailures, 1.3) * TimeSpan.FromSeconds(5));
+                        await BotRunControl.DelayAsync(Math.Pow(successiveFailures, 1.3) * TimeSpan.FromSeconds(5));
                     }
 
                     if (client.Game.IsInGame())
@@ -136,7 +143,7 @@ public abstract class SingleClientBotBase
                     }
                     else
                     {
-                        await Task.Delay(TimeSpan.FromSeconds(1));
+                        await BotRunControl.DelayAsync(TimeSpan.FromSeconds(1));
                     }
                 }
                 catch (HttpRequestException)

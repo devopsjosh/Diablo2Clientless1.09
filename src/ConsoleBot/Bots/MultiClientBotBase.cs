@@ -76,8 +76,11 @@ public abstract class MultiClientBotBase : IBotInstance
         });
 
         int gameCount = 1;
+        var breakScheduler = new GameBreakScheduler(_config.Humanization);
         while (true)
         {
+            await BotRunControl.WaitIfStoppedAsync();
+
             _pickitItemsOnGround.Clear();
             _pickitPotionsOnGround.Clear();
             foreach (var playerInGame in PlayersInGame)
@@ -118,12 +121,15 @@ public abstract class MultiClientBotBase : IBotInstance
                 ClientsNeedingMule.Clear();
                 if(_multiClientConfig.ShouldCreateGames)
                 {
+                    await BotRunControl.WaitIfStoppedAsync();
+                    await breakScheduler.MaybeApplyBreakAsync();
+                    await BotRunControl.DelayAsync(breakScheduler.GetPreGameCreateDelay());
                     var result = await RealmConnectHelpers.CreateGameWithRetry(gameCount, firstFiller, _config, _multiClientConfig.Accounts.First());
                     gameCount = result.Item2;
                     if (!result.Item1)
                     {
                         gameCount++;
-                        await Task.Delay(TimeSpan.FromSeconds(60));
+                        await BotRunControl.DelayAsync(TimeSpan.FromSeconds(60));
                         continue;
                     }
                 }
@@ -144,7 +150,11 @@ public abstract class MultiClientBotBase : IBotInstance
                 {
                     var account = _multiClientConfig.Accounts[i];
                     var client = clients[i];
-                    var numberOfSecondsToWait = i > 2 ? TimeSpan.FromSeconds(15) : TimeSpan.Zero;
+                    var numberOfSecondsToWait = i > 2
+                        ? (_config.Humanization.Enabled
+                            ? HumanizationSettings.GetRandomSeconds(_config.Humanization.JoinStaggerMinSeconds, _config.Humanization.JoinStaggerMaxSeconds)
+                            : TimeSpan.FromSeconds(15))
+                        : TimeSpan.Zero;
                     prepareTasks.Add(InternalPrepareForRun(client, account, numberOfSecondsToWait, gameCount));
                 }
 
@@ -202,6 +212,7 @@ public abstract class MultiClientBotBase : IBotInstance
             }
 
             Log.Information($"Going to next game");
+            breakScheduler.RecordGameCompleted();
             gameCount++;
         }
     }
@@ -213,7 +224,8 @@ public abstract class MultiClientBotBase : IBotInstance
 
     private async Task<bool> InternalPrepareForRun(Client client, AccountConfig account, TimeSpan waitToJoinTime, int gameCount)
     {
-        await Task.Delay(waitToJoinTime);
+        await BotRunControl.DelayAsync(waitToJoinTime);
+        await BotRunControl.WaitIfStoppedAsync();
         if (!client.Game.IsInGame() && !await RealmConnectHelpers.JoinGameWithRetry(gameCount, client, _config, account))
         {
             Log.Warning($"Client {client.LoggedInUserName()} failed to join game, retrying new game");
@@ -463,7 +475,7 @@ public abstract class MultiClientBotBase : IBotInstance
             {
                 client.Game.ChangeSkill(Skill.Vigor, Hand.Right);
             }
-            Log.Information($"Client {client.Game.Me.Name} picking up {item.Name}");
+            Log.Information($"Client {client.Game.Me.Name} picking up {item.Name} [{item.Classification}]");
             await MoveToLocation(client, item.Location);
             if (item.Ground)
             {
@@ -501,7 +513,7 @@ public abstract class MultiClientBotBase : IBotInstance
                 }
                 if (item.Ground)
                 {
-                    Log.Information($"Client {client.Game.Me.Name} picking up {item.Amount} {item.Name}");
+                    Log.Information($"Client {client.Game.Me.Name} picking up {item.Amount} {item.Name} [{item.Classification}]");
                     await MoveToLocation(client, item.Location);
                     if (client.Game.Inventory.FindFreeSpace(item) != null && await GeneralHelpers.TryWithTimeout(async (retryCount) =>
                     {

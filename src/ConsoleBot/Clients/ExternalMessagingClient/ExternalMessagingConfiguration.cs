@@ -8,7 +8,10 @@ public class ExternalMessagingConfiguration
     public string TelegramApiKey { get; set; }
 
     [Required]
-    public int TelegramChatId { get; set; }
+    public long TelegramChatId { get; set; }
 
-    public bool ReceiveMessages { get; set; }
+    [Required]
+    public long TelegramAdminUserId { get; set; }
+
+    public bool ReceiveMessages { get; set; } = true;
 }
