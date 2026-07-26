@@ -80,6 +80,7 @@ The same structure applies to `mephisto`, `travincal`, and `pindle` — just cha
 | `username` | string | ✓ | — | Battle.net account username |
 | `password` | string | ✓ | — | Battle.net account password |
 | `character` | string | ✓ | — | Character name to log in with |
+| `enabled` | bool | | `true` | Whether this account is active. If `false`, the account is excluded from follower/assistant participation. For `bot.assist`, the account matching `hostCharacterName` or `leadCharacterName` cannot be disabled. |
 | `resurrectMerc` | bool | | `true` | Automatically resurrect the mercenary when entering town |
 
 ---
@@ -193,13 +194,18 @@ At least one of `quality`, `itemNames`, or `classification` must be set.
 
 ### `bot.assist` — Assist Bot
 
-Follows another character and assists with combat. Does not create games.
+Follows another character and assists with combat. The account matching hostCharacterName creates the game.
 
 | Key | Type | Required | Description |
 |---|---|---|---|
 | `accounts` | AccountConfig[] | ✓ | List of accounts to connect as followers |
-| `hostCharacterName` | string | | Name of the character who hosts/creates the game |
+| `hostCharacterName` | string | ✓ | Name of the character who hosts/creates the game |
 | `leadCharacterName` | string | ✓ | Name of the character to follow and assist |
+
+Notes:
+- A character may be both `hostCharacterName` and an enabled leecher account (`isLeecher: true`).
+- The account whose character matches `leadCharacterName` cannot be marked as a leecher.
+- The `ng` chat command is honored only when sent by `leadCharacterName`; `ng` from any other character (including the host) is ignored.
 
 ---
 

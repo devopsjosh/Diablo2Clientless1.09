@@ -32,6 +32,7 @@ public class AssistBot : IBotInstance
     private readonly ITownManagementService _townManagementService;
     private readonly IAttackService _attackService;
     private readonly AssistConfiguration _assistConfig;
+    private readonly DangerAnnouncementCoordinator _dangerAnnouncementCoordinator;
 
     public AssistBot(
         IOptions<BotConfiguration> config,
@@ -49,11 +50,17 @@ public class AssistBot : IBotInstance
         _assistConfig = assistConfig.Value;
         _townManagementService = townManagementService;
         _attackService = attackService;
+        _dangerAnnouncementCoordinator = new DangerAnnouncementCoordinator(() => DateTimeOffset.UtcNow);
     }
 
     public string GetName()
     {
         return "assist";
+    }
+
+    public static IEnumerable<AccountConfig> GetEnabledAccounts(IEnumerable<AccountConfig> accounts)
+    {
+        return accounts.Where(account => account.Enabled);
     }
 
     public async Task Run()
@@ -67,7 +74,7 @@ public class AssistBot : IBotInstance
 
         _assistConfig.Validate();
         var clients = new List<Tuple<AccountConfig, Client, AssistBotClientState>>();
-        foreach (var account in _assistConfig.Accounts)
+        foreach (var account in GetEnabledAccounts(_assistConfig.Accounts))
         {
             var client = new Client();
             var accountAndClient = Tuple.Create(account, client, new AssistBotClientState());
@@ -80,15 +87,36 @@ public class AssistBot : IBotInstance
             client.OnReceivedPacketEvent(InComingPacket.ReceiveChat, (packet) =>
             {
                 var chatPacket = new ChatPacket(packet);
+                var senderIsLead = string.Equals(chatPacket.CharacterName, _assistConfig.LeadCharacterName, StringComparison.OrdinalIgnoreCase);
+                var isSafeCommandMessage = string.Equals(chatPacket.Message, _assistConfig.SafeCommand, StringComparison.OrdinalIgnoreCase);
+                if (LeecherLogic.ShouldHandleSafeCommand(
+                    accountAndClient.Item1.IsLeecher,
+                    chatPacket.Message,
+                    chatPacket.CharacterName,
+                    _assistConfig.LeadCharacterName,
+                    _assistConfig.SafeCommand))
+                {
+                    accountAndClient.Item3.SafeSignalReceived = true;
+                    Log.Information($"{accountAndClient.Item1.Character} received safe command from lead character {_assistConfig.LeadCharacterName}");
+                }
+                else if (isSafeCommandMessage && !senderIsLead)
+                {
+                    Log.Debug($"{accountAndClient.Item1.Character} ignored safe command from {chatPacket.CharacterName} because only lead character {_assistConfig.LeadCharacterName} can issue it");
+                }
+
                 if (chatPacket.Message == "stop")
                 {
                     accountAndClient.Item3.ShouldStop = true;
                     Log.Information($"{accountAndClient.Item1.Character} Stopping bot due to receiving stop message");
                 }
-                else if (chatPacket.Message == "ng")
+                else if (LeecherLogic.IsNextGameCommand(chatPacket.Message, chatPacket.CharacterName, _assistConfig.LeadCharacterName))
                 {
                     accountAndClient.Item3.NextGame = true;
                     Log.Information($"{accountAndClient.Item1.Character} Going next game");
+                }
+                else if (string.Equals(chatPacket.Message, "ng", StringComparison.OrdinalIgnoreCase) && !senderIsLead)
+                {
+                    Log.Debug($"{accountAndClient.Item1.Character} ignored ng command from {chatPacket.CharacterName} because only lead character {_assistConfig.LeadCharacterName} can issue it");
                 }
                 else if (chatPacket.Message == "nofollow")
                 {
@@ -286,7 +314,14 @@ public class AssistBot : IBotInstance
                 await Task.Delay(TimeSpan.FromSeconds(0.1));
                 if(client.Game.IsInGame())
                 {
-                    await AssistLeadClient(client, c.Item1, c.Item3);
+                    if (c.Item1.IsLeecher)
+                    {
+                        await AssistLeecherClient(client, c.Item3);
+                    }
+                    else
+                    {
+                        await AssistLeadClient(client, c.Item1, c.Item3);
+                    }
                 }
                 else
                 {
@@ -508,6 +543,116 @@ public class AssistBot : IBotInstance
         }
 
         return true;
+    }
+
+    private async Task<bool> AssistLeecherClient(Client client, AssistBotClientState state)
+    {
+        var leadPlayer = GetLeadPlayer(client);
+        var leaderInSameZone = IsLeaderInSameZone(client, leadPlayer);
+        var monsterInDanger = !client.Game.IsInTown()
+            && NPCHelpers.GetNearbyNPCs(client, client.Game.Me.Location, 1, _assistConfig.DangerDistance).Any();
+
+        var current = state.LeecherState;
+        var portalActionSucceeded = false;
+
+        if (current == LeecherState.EnteringLeaderZone && leadPlayer != null && !leaderInSameZone)
+        {
+            await GetToLeadArea(client, leadPlayer);
+            leadPlayer = GetLeadPlayer(client);
+            leaderInSameZone = IsLeaderInSameZone(client, leadPlayer);
+        }
+        else if (current == LeecherState.StationaryInZone && state.EntryLocation != null)
+        {
+            var driftDistance = client.Game.Me.Location.Distance(state.EntryLocation);
+            if (LeecherLogic.ShouldCorrectEntryLocationDrift(driftDistance, _assistConfig.EntryLocationDriftThreshold))
+            {
+                Log.Information($"{client.Game.Me.Name} correcting leecher entry location drift ({driftDistance:0.##}) back to {state.EntryLocation}");
+                try
+                {
+                    await MovementHelpers.MoveToLocation(client.Game, _pathingService, _mapApiService, state.EntryLocation, GetMovementMode(client.Game));
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, $"{client.Game.Me.Name} failed to correct leecher entry location drift; continuing leecher loop");
+                }
+            }
+        }
+        else if (current == LeecherState.RetreatingToTown)
+        {
+            portalActionSucceeded = await RetreatLeecherToTown(client, leadPlayer);
+        }
+
+        var next = LeecherLogic.GetNextLeecherState(
+            current,
+            state.SafeSignalReceived,
+            leaderInSameZone,
+            monsterInDanger,
+            portalActionSucceeded);
+
+        if (next == LeecherState.EnteringLeaderZone
+            && state.EnteringLeaderZoneStartedAt.HasValue
+            && LeecherLogic.ShouldAbortEnteringLeaderZone(
+                DateTimeOffset.UtcNow - state.EnteringLeaderZoneStartedAt.Value,
+                TimeSpan.FromSeconds(_assistConfig.EnteringLeaderZoneTimeoutSeconds)))
+        {
+            Log.Warning($"{client.Game.Me.Name} timed out entering leader zone after {_assistConfig.EnteringLeaderZoneTimeoutSeconds} seconds; returning to waiting state");
+            next = LeecherState.WaitingForSafe;
+        }
+
+        if (current != LeecherState.RetreatingToTown && next == LeecherState.RetreatingToTown)
+        {
+            state.DangerAnnouncementHandledForCurrentRetreat = false;
+        }
+
+        if (next == LeecherState.RetreatingToTown && !state.DangerAnnouncementHandledForCurrentRetreat)
+        {
+            if (_dangerAnnouncementCoordinator.TryClaimAnnouncement(TimeSpan.FromSeconds(_assistConfig.DangerAnnouncementCooldownSeconds)))
+            {
+                client.Game.SendInGameMessage(_assistConfig.DangerMessage);
+            }
+
+            state.DangerAnnouncementHandledForCurrentRetreat = true;
+        }
+
+        if (next == LeecherState.StationaryInZone && current != LeecherState.StationaryInZone)
+        {
+            state.EntryLocation = client.Game.Me.Location;
+        }
+
+        if (current == LeecherState.WaitingForSafe && next != LeecherState.WaitingForSafe)
+        {
+            state.SafeSignalReceived = false;
+        }
+
+        if (current != LeecherState.EnteringLeaderZone && next == LeecherState.EnteringLeaderZone)
+        {
+            state.EnteringLeaderZoneStartedAt = DateTimeOffset.UtcNow;
+        }
+
+        if (next == LeecherState.WaitingForSafe)
+        {
+            LeecherLogic.ResetPerCycleStateForWaitingForSafe(state);
+        }
+
+        state.LeecherState = next;
+        return true;
+    }
+
+    private async Task<bool> RetreatLeecherToTown(Client client, Player leadPlayer)
+    {
+        return await LeecherRetreatOrchestrator.RetreatToTown(
+            _townManagementService,
+            client,
+            leadPlayer,
+            client.Game.Area,
+            client.Game.IsInTown());
+    }
+
+    private static bool IsLeaderInSameZone(Client client, Player leadPlayer)
+    {
+        return leadPlayer != null
+            && leadPlayer.Area.HasValue
+            && leadPlayer.Area.Value == client.Game.Area;
     }
 
     private async Task<bool> HealInTown(Client client, AccountConfig account, AssistBotClientState state)

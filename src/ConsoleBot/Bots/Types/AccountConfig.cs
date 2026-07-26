@@ -17,6 +17,10 @@ public class AccountConfig
 
     public bool SameAsLeadAccount { get; set; }
 
+    public bool IsLeecher { get; set; }
+
+    public bool Enabled { get; set; } = true;
+
 
     public List<int> HealthSlots = [0, 1];
 

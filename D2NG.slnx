@@ -6,6 +6,7 @@
     <File Path="global.json" />
   </Folder>
   <Project Path="src/ConsoleBot/ConsoleBot.csproj" />
+  <Project Path="src/ConsoleBot.Tests/ConsoleBot.Tests.csproj" />
   <Project Path="src/D2NG.Core.Tests/D2NG.Core.Tests.csproj" />
   <Project Path="src/D2NG.Core/D2NG.Core.csproj" />
   <Project Path="src/D2NG.MuleManager.UI/D2NG.MuleManager.UI.csproj" />

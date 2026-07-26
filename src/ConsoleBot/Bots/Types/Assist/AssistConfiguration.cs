@@ -12,6 +12,18 @@ public class AssistConfiguration
 
     public string LeadCharacterName { get; set; }
 
+    public string SafeCommand { get; set; } = "safe";
+
+    public int DangerDistance { get; set; } = 5;
+
+    public string DangerMessage { get; set; } = "Danger Will Robinson! Danger!";
+
+    public int EntryLocationDriftThreshold { get; set; } = 5;
+
+    public int EnteringLeaderZoneTimeoutSeconds { get; set; } = 30;
+
+    public int DangerAnnouncementCooldownSeconds { get; set; } = 2;
+
     public int LoginStaggerMinSeconds { get; set; } = 5;
     public int LoginStaggerMaxSeconds { get; set; } = 20;
     public int JoinStaggerMinSeconds { get; set; } = 5;
@@ -34,6 +46,56 @@ public class AssistConfiguration
         if (string.IsNullOrEmpty(LeadCharacterName))
         {
             throw new ValidationException($"{nameof(LeadCharacterName)} is required on assist configuration");
+        }
+
+        if (string.IsNullOrWhiteSpace(SafeCommand))
+        {
+            throw new ValidationException($"{nameof(SafeCommand)} is required on assist configuration");
+        }
+
+        if (DangerDistance <= 0)
+        {
+            throw new ValidationException($"{nameof(DangerDistance)} should be positive on assist configuration");
+        }
+
+        if (string.IsNullOrWhiteSpace(DangerMessage))
+        {
+            throw new ValidationException($"{nameof(DangerMessage)} is required on assist configuration");
+        }
+
+        if (EntryLocationDriftThreshold <= 0)
+        {
+            throw new ValidationException($"{nameof(EntryLocationDriftThreshold)} should be positive on assist configuration");
+        }
+
+        if (EnteringLeaderZoneTimeoutSeconds <= 0)
+        {
+            throw new ValidationException($"{nameof(EnteringLeaderZoneTimeoutSeconds)} should be positive on assist configuration");
+        }
+
+        if (DangerAnnouncementCooldownSeconds <= 0)
+        {
+            throw new ValidationException($"{nameof(DangerAnnouncementCooldownSeconds)} should be positive on assist configuration");
+        }
+
+        if (!Accounts.Any(a => a.Enabled))
+        {
+            throw new ValidationException($"At least one enabled {nameof(Accounts)} entry is required on assist configuration");
+        }
+
+        if (Accounts.Any(a => !a.Enabled && a.Character.Equals(HostCharacterName, System.StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new ValidationException($"{nameof(HostCharacterName)} cannot be disabled");
+        }
+
+        if (Accounts.Any(a => !a.Enabled && a.Character.Equals(LeadCharacterName, System.StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new ValidationException($"{nameof(LeadCharacterName)} cannot be disabled");
+        }
+
+        if (Accounts.Any(a => a.IsLeecher && a.Character.Equals(LeadCharacterName, System.StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new ValidationException($"{nameof(LeadCharacterName)} cannot be marked as leecher");
         }
 
         ValidateStaggerRange(nameof(LoginStaggerMinSeconds), LoginStaggerMinSeconds, nameof(LoginStaggerMaxSeconds), LoginStaggerMaxSeconds);
