@@ -4,7 +4,7 @@ using D2NG.Core.D2GS.Players;
 
 namespace ConsoleBot.Pickit;
 
-public static class Staves
+public static class  Staves
 {
     public static bool ShouldPickupItemClassic(Item item)
     {

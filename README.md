@@ -7,6 +7,20 @@
 ## Building the project
 This project builds with .NET 10 and can be built by running `dotnet build` on the command line from the root of the Solution.
 
+## Agentic Implementation Workflow
+This repository includes a staged Copilot workflow for implementation work:
+
+- Planning
+- TDD Tests
+- Implementation
+- Review
+- Unit Test Expansion
+- QA
+
+Start with the prompt file `.github/prompts/start-implementation-workflow.prompt.md`.
+
+For workflow details, model allocation, approval checkpoints, and quality gates, see [docs/agentic-workflow.md](docs/agentic-workflow.md).
+
 ## Functionality
 Initially based on https://github.com/dkuwahara/D2NG, but now with a lot more features.
 

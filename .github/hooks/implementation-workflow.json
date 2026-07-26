@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "windows": "powershell -NoProfile -ExecutionPolicy Bypass -File ./.github/hooks/scripts/pretool-policy.ps1",
+        "linux": "pwsh -NoProfile -File ./.github/hooks/scripts/pretool-policy.ps1",
+        "osx": "pwsh -NoProfile -File ./.github/hooks/scripts/pretool-policy.ps1",
+        "timeout": 10
+      }
+    ]
+  }
+}

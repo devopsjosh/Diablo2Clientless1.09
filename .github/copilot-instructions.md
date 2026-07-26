@@ -14,3 +14,9 @@
 - Pickit rules: see [.github/instructions/pickit.instructions.md](.github/instructions/pickit.instructions.md)
 - Muling rules and triggers: see [.github/instructions/muling.instructions.md](.github/instructions/muling.instructions.md)
 - Bot type architecture: see [.github/instructions/bot-types.instructions.md](.github/instructions/bot-types.instructions.md)
+
+## Workflow Customization Files
+- Implementation workflow instructions: see [.github/instructions/implementation-workflow.instructions.md](.github/instructions/implementation-workflow.instructions.md)
+- Orchestrator and stage agents: see [.github/agents](.github/agents)
+- Workflow launch prompt: see [.github/prompts/start-implementation-workflow.prompt.md](.github/prompts/start-implementation-workflow.prompt.md)
+- Workflow hooks: see [.github/hooks/implementation-workflow.json](.github/hooks/implementation-workflow.json)

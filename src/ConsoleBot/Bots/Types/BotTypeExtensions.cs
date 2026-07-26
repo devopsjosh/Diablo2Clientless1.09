@@ -5,6 +5,7 @@ using ConsoleBot.Bots.Types.Cows;
 using ConsoleBot.Bots.Types.CS;
 using ConsoleBot.Bots.Types.Cuber;
 using ConsoleBot.Bots.Types.Mephisto;
+using ConsoleBot.Bots.Types.MephistoAndariel;
 using ConsoleBot.Bots.Types.Pindle;
 using ConsoleBot.Bots.Types.Travincal;
 using Microsoft.Extensions.Configuration;
@@ -26,11 +27,14 @@ public static class BotTypeExtensions
         services.AddSingleton<IBotInstance, BaalBot>();
         services.AddSingleton<IBotInstance, CubeBot>();
         services.AddSingleton<IBotInstance, AndarielBot>();
+        services.AddSingleton<IBotInstance, MephistoAndarielBot>();
         services.AddSingleton<IBotFactory, BotFactory>();
         services.AddOptions<CowConfiguration>()
             .Bind(config.GetSection("bot").GetSection("cows"));
         services.AddOptions<MephistoConfiguration>()
             .Bind(config.GetSection("bot").GetSection("mephisto"));
+        services.AddOptions<MephistoAndarielConfiguration>()
+            .Bind(config.GetSection("bot").GetSection("mephistoandariel"));
         services.AddOptions<TravincalConfiguration>()
             .Bind(config.GetSection("bot").GetSection("travincal"));
         services.AddOptions<CsConfiguration>()

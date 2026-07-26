@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ConsoleBot with config + muleconfig",
+      "type": "coreclr",
+      "request": "launch",
+      "program": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "${workspaceFolder}/src/ConsoleBot/ConsoleBot.csproj",
+        "--",
+        "config=${workspaceFolder}\\config.json",
+        "muleconfig=${workspaceFolder}\\muleconfig.json"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ]
+}

@@ -47,6 +47,7 @@ dotnet ConsoleBot.dll --config config.json --muleconfig muleconfig.json
 |---|---|---|
 | `andariel` | Andariel killer (Act 1) | `bot.andariel` |
 | `mephisto` | Mephisto killer (Act 3) | `bot.mephisto` |
+| `mephistoandariel` | Runs Mephisto (Act 3) then Andariel (Act 1) back-to-back on the same character in one game | `bot.mephistoandariel` |
 | `travincal` | Travincal Council killer (Act 3) | `bot.travincal` |
 | `pindle` | Pindleskin killer (Act 5) | `bot.pindle` |
 | `cows` | Secret Cow Level runner | `bot.cows` |
@@ -80,6 +81,36 @@ The same structure applies to `mephisto`, `travincal`, and `pindle` — just cha
 | `password` | string | ✓ | — | Battle.net account password |
 | `character` | string | ✓ | — | Character name to log in with |
 | `resurrectMerc` | bool | | `true` | Automatically resurrect the mercenary when entering town |
+
+---
+
+### `bot.mephistoandariel` — Combined Mephisto + Andariel Bot
+
+Runs a Mephisto kill (Act 3) followed by an Andariel kill (Act 1) in the same game, on the same
+character, returning to town between kills for repair/sell/potions/stash. If the stash fills up
+between the two kills, the Andariel phase is skipped for that game and a mule run is triggered
+before the next game starts. Only Sorceress characters are supported.
+
+```json
+"mephistoandariel": {
+  "username": "myaccount",
+  "password": "mypassword",
+  "character": "MyChar",
+  "debug": {
+    "enabled": false,
+    "logEveryTicks": 5
+  }
+}
+```
+
+| Key | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `username` | string | ✓ | — | Battle.net account username |
+| `password` | string | ✓ | — | Battle.net account password |
+| `character` | string | ✓ | — | Character name to log in with |
+| `resurrectMerc` | bool | | `true` | Automatically resurrect the mercenary when entering town |
+| `debug.enabled` | bool | | `false` | Enables verbose per-tick logging during the Andariel kill phase |
+| `debug.logEveryTicks` | int | | `5` | How often (in ticks) to log verbose Andariel-phase debug info |
 
 ---
 

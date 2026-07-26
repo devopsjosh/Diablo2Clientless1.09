@@ -138,13 +138,8 @@ public class AssistBot : IBotInstance
 
         while (!clients.All(c => c.Item3.ShouldStop))
         {
-            var activeClients = clients.Where(c => !c.Item3.ShouldStop);
-            var leaveTasks = activeClients.Select(async (c, i) =>
-            {
-                c.Item3.NextGame = false;
-                return await LeaveGameAndRejoinMCPWithRetry(c.Item2, c.Item1);
-            }).ToList();
-            var leaveResults = await Task.WhenAll(leaveTasks);
+            var activeClients = clients.Where(c => !c.Item3.ShouldStop).ToList();
+            var leaveResults = await LeaveAndRejoinWithUsernameStagger(activeClients);
             if (leaveResults.Any(r => !r))
             {
                 Log.Warning($"One or more characters failed to leave and rejoin");
@@ -220,14 +215,19 @@ public class AssistBot : IBotInstance
 
     public async Task GameLoop(List<Tuple<AccountConfig, Client, AssistBotClientState>> clients, int gameCount)
     {
+        var joinDelays = BuildJoinDelays(clients);
         var nextGameCancellation = new CancellationTokenSource();
         var gameTasks = clients.Select(async (c, i) =>
         {
             if (!IsHostClient(c.Item1))
             {
-                var numberOfSecondsToWait = (i > 3 ? 15 : 0);
-                Log.Information($"Waiting {numberOfSecondsToWait} seconds for joining game with {c.Item1.Character}");
-                await Task.Delay(TimeSpan.FromSeconds(numberOfSecondsToWait));
+                var joinDelay = joinDelays[c];
+                if (joinDelay > TimeSpan.Zero)
+                {
+                    Log.Information($"Waiting {joinDelay.TotalSeconds:0.#} seconds before joining game with {c.Item1.Character}");
+                    await Task.Delay(joinDelay);
+                }
+
                 Log.Information($"Starting joining game with {c.Item1.Character}");
                 if (!await RealmConnectHelpers.JoinGameWithRetry(gameCount, c.Item2, _config, c.Item1))
                 {
@@ -237,32 +237,10 @@ public class AssistBot : IBotInstance
 
             Log.Information("In game");
             var client = c.Item2;
-            client.Game.RequestUpdate(client.Game.Me.Id);
-            if (!await GeneralHelpers.TryWithTimeout(
-                async (_) =>
-                {
-                    await Task.Delay(100);
-                    return client.Game.Me.Location.X != 0 && client.Game.Me.Location.Y != 0;
-                },
-                TimeSpan.FromSeconds(10)))
+            if (!await PerformPostJoinTownTasks(client, c.Item1))
             {
                 return false;
             }
-
-            var townManagementOptions = new TownManagementOptions(c.Item1, client.Game.Act)
-            {
-                HealthPotionsToBuy = Math.Max(0, client.Game.Belt.Height * c.Item1.HealthSlots.Count + 10 - InventoryHelpers.GetTotalHealthPotions(client.Game)),
-                ManaPotionsToBuy = Math.Max(0, client.Game.Belt.Height * c.Item1.ManaSlots.Count + 5 - InventoryHelpers.GetTotalManaPotions(client.Game))
-            };
-
-            var townTaskResult = await _townManagementService.PerformTownTasks(client, townManagementOptions);
-            if (!townTaskResult.Succes)
-            {
-                return false;
-            }
-
-            Log.Information($"Starting {client.Game.Me.Name} with life {client.Game.Me.Life} out of {client.Game.Me.MaxLife}" +
-                $" and {InventoryHelpers.GetTotalHealthPotions(client.Game)} healthpotions and {InventoryHelpers.GetTotalManaPotions(client.Game)} mana potions");
 
             var leadPlayer = GetLeadPlayer(client);
             if (!await GeneralHelpers.TryWithTimeout(
@@ -315,7 +293,14 @@ public class AssistBot : IBotInstance
                     await Task.Delay(TimeSpan.FromSeconds(3));
                     if (await client.RejoinMCP() || await RealmConnectHelpers.ConnectToRealmWithRetry(client, _config, c.Item1, 10))
                     {
-                        await RealmConnectHelpers.JoinGameWithRetry(gameCount, c.Item2, _config, c.Item1);
+                        if (await RealmConnectHelpers.JoinGameWithRetry(gameCount, c.Item2, _config, c.Item1))
+                        {
+                            if (!await PerformPostJoinTownTasks(client, c.Item1))
+                            {
+                                Log.Warning($"{c.Item1.Character} failed post-rejoin town tasks, going next game");
+                                c.Item3.NextGame = true;
+                            }
+                        }
                     }
                 }
                 
@@ -341,6 +326,105 @@ public class AssistBot : IBotInstance
             return;
         }
 
+    }
+
+    private async Task<List<bool>> LeaveAndRejoinWithUsernameStagger(List<Tuple<AccountConfig, Client, AssistBotClientState>> activeClients)
+    {
+        var usernameGroups = activeClients
+            .GroupBy(c => c.Item1.Username, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.ToList())
+            .ToList();
+
+        var groupTasks = usernameGroups.Select(async group =>
+        {
+            var results = new List<bool>();
+            for (int index = 0; index < group.Count; index++)
+            {
+                var accountAndClient = group[index];
+                accountAndClient.Item3.NextGame = false;
+
+                if (index > 0)
+                {
+                    var loginDelay = GetRandomStaggerDelay(_assistConfig.LoginStaggerMinSeconds, _assistConfig.LoginStaggerMaxSeconds);
+                    if (loginDelay > TimeSpan.Zero)
+                    {
+                        Log.Information($"Waiting {loginDelay.TotalSeconds:0.#} seconds before reconnecting {accountAndClient.Item1.Character}");
+                        await Task.Delay(loginDelay);
+                    }
+                }
+
+                results.Add(await LeaveGameAndRejoinMCPWithRetry(accountAndClient.Item2, accountAndClient.Item1));
+            }
+
+            return results;
+        });
+
+        var groupedResults = await Task.WhenAll(groupTasks);
+        return groupedResults.SelectMany(r => r).ToList();
+    }
+
+    private Dictionary<Tuple<AccountConfig, Client, AssistBotClientState>, TimeSpan> BuildJoinDelays(List<Tuple<AccountConfig, Client, AssistBotClientState>> clients)
+    {
+        var joinDelays = clients.ToDictionary(c => c, _ => TimeSpan.Zero);
+
+        foreach (var group in clients.Where(c => !IsHostClient(c.Item1)).GroupBy(c => c.Item1.Username, StringComparer.OrdinalIgnoreCase))
+        {
+            var cumulativeDelay = TimeSpan.Zero;
+            var position = 0;
+            foreach (var accountAndClient in group)
+            {
+                if (position > 0)
+                {
+                    cumulativeDelay += GetRandomStaggerDelay(_assistConfig.JoinStaggerMinSeconds, _assistConfig.JoinStaggerMaxSeconds);
+                }
+
+                joinDelays[accountAndClient] = cumulativeDelay;
+                position++;
+            }
+        }
+
+        return joinDelays;
+    }
+
+    private async Task<bool> PerformPostJoinTownTasks(Client client, AccountConfig account)
+    {
+        client.Game.RequestUpdate(client.Game.Me.Id);
+        if (!await GeneralHelpers.TryWithTimeout(
+            async (_) =>
+            {
+                await Task.Delay(100);
+                return client.Game.Me.Location.X != 0 && client.Game.Me.Location.Y != 0;
+            },
+            TimeSpan.FromSeconds(10)))
+        {
+            return false;
+        }
+
+        var townManagementOptions = new TownManagementOptions(account, client.Game.Act)
+        {
+            HealthPotionsToBuy = Math.Max(0, client.Game.Belt.Height * account.HealthSlots.Count + 10 - InventoryHelpers.GetTotalHealthPotions(client.Game)),
+            ManaPotionsToBuy = Math.Max(0, client.Game.Belt.Height * account.ManaSlots.Count + 5 - InventoryHelpers.GetTotalManaPotions(client.Game))
+        };
+
+        var townTaskResult = await _townManagementService.PerformTownTasks(client, townManagementOptions);
+        if (!townTaskResult.Succes)
+        {
+            return false;
+        }
+
+        Log.Information($"Starting {client.Game.Me.Name} with life {client.Game.Me.Life} out of {client.Game.Me.MaxLife}" +
+            $" and {InventoryHelpers.GetTotalHealthPotions(client.Game)} healthpotions and {InventoryHelpers.GetTotalManaPotions(client.Game)} mana potions");
+        return true;
+    }
+
+    private static TimeSpan GetRandomStaggerDelay(int minSeconds, int maxSeconds)
+    {
+        if (maxSeconds == 0)
+        {
+            return TimeSpan.Zero;
+        }
+
+        return TimeSpan.FromSeconds(Random.Shared.Next(minSeconds, maxSeconds + 1));
     }
 
     private async Task<bool> AssistLeadClient(Client client, AccountConfig account, AssistBotClientState state)

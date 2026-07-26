@@ -15,6 +15,8 @@ public class AccountConfig
     [Required]
     public string Character { get; set; }
 
+    public bool SameAsLeadAccount { get; set; }
+
 
     public List<int> HealthSlots = [0, 1];
 
